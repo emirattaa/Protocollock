@@ -8,7 +8,7 @@ import java.util.Calendar
 object Prefs {
     const val OATH = "Önemli bir nedenim var, yemin ederim."
     const val BYPASS_MIN = 10          // yeminden sonra kaç dk izin
-    const val GRACE_SEC = 5            // süre dolunca bildirim → kaç sn sonra yemin ekranı
+    const val GRACE_SEC = 3            // süre dolunca bildirim → kaç sn sonra yemin ekranı
     const val NOTIF_TEXT = "Yo big Harv Wait for me"
 
     private fun p(c: Context) = c.getSharedPreferences("strict", 0)
@@ -26,7 +26,7 @@ object Prefs {
     fun grantBypass(c: Context, pkg: String) =
         p(c).edit().putLong("by:$pkg", System.currentTimeMillis() + BYPASS_MIN * 60_000L).apply()
 
-    class Usage(val totals: Map<String, Long>)
+    class Usage(val totals: Map<String, Long>, val fg: String?)
 
     /**
      * Bugünkü kullanım süresi. Android'in toplam istatistiği o an AÇIK olan oturumu saymadığı için
@@ -58,7 +58,7 @@ object Prefs {
             }
         }
         cur?.let { totals[it] = (totals[it] ?: 0L) + (now - curStart) }
-        return Usage(totals)
+        return Usage(totals, cur)
     }
 
     /** Süre doldu ve yemin sonrası geçici izin de yok. */
