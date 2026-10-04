@@ -1,6 +1,9 @@
 package com.example.strictmode
 
+import android.app.AppOpsManager
 import android.content.Intent
+import android.os.Process
+import androidx.core.app.NotificationManagerCompat
 import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.provider.Settings
@@ -29,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bar: LinearLayout
     private lateinit var btnSet: Button
     private lateinit var btnClear: Button
+    private lateinit var status: TextView
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -68,6 +72,7 @@ class MainActivity : AppCompatActivity() {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         }
 
+        status = TextView(this).apply { textSize = 12f; setPadding(dp(12), dp(8), dp(12), 0) }
         val perms = Button(this).apply {
             text = "İzinler (4 adım)"
             setOnClickListener {
@@ -122,7 +127,7 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(perms); addView(tabs); addView(search)
+            addView(status); addView(perms); addView(tabs); addView(search)
             addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
             addView(bar)
         })
@@ -159,7 +164,22 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("İptal", null).show()
     }
 
+    private fun updateStatus() {
+        fun mark(b: Boolean) = if (b) "✅" else "❌"
+        val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: ""
+        val alive = System.currentTimeMillis() - GuardService.lastTick < 5_000
+        val ops = getSystemService(AppOpsManager::class.java)
+        val usage = ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName) ==
+            AppOpsManager.MODE_ALLOWED
+        val listener = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
+        val notif = NotificationManagerCompat.from(this).areNotificationsEnabled()
+        status.text = "Erişilebilirlik ${mark(enabled.contains(packageName, true))}  " +
+            "Servis çalışıyor ${mark(alive)}  Ekranı okuyor ${mark(GuardService.rootOk)}\n" +
+            "Kullanım erişimi ${mark(usage)}  Bildirim erişimi ${mark(listener)}  Bildirim izni ${mark(notif)}"
+    }
+
     private fun refresh() {
+        updateStatus()
         val limits = Prefs.limits(this)
         shown = all.filter {
             (!onlyLimited || limits.containsKey(it.pkg)) && it.name.contains(query, ignoreCase = true)
