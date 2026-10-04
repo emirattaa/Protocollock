@@ -1,6 +1,9 @@
 package com.example.strictmode
 
 import android.accessibilityservice.AccessibilityService
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Handler
@@ -17,21 +20,19 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 
-/**
- * Süre dolan uygulamanın ÜSTÜNE tam ekran yemin ekranı çizer (erişilebilirlik overlay'i).
- * Activity başlatmadığı için Android'in arka plandan activity açma kısıtına takılmaz.
- */
 class GuardService : AccessibilityService() {
     private val h = Handler(Looper.getMainLooper())
     private var current: String? = null
+    private var pending: String? = null
     private var overlay: View? = null
     private var overlayPkg: String? = null
     private var ignored = setOf<String>()
 
+    // Her 2 sn'de bir ekrandaki gerçek uygulamaya bakar (olay kaçarsa bile yakalar)
     private val tick = object : Runnable {
         override fun run() {
-            if (overlay == null) current?.let { check(it) }
-            h.postDelayed(this, 20_000)
+            try { poll() } catch (_: Throwable) {}
+            h.postDelayed(this, 2_000)
         }
     }
 
@@ -39,25 +40,62 @@ class GuardService : AccessibilityService() {
         val imm = getSystemService(InputMethodManager::class.java)
         val keyboards = imm?.enabledInputMethodList?.map { it.packageName }?.toSet() ?: emptySet()
         ignored = keyboards + setOf("com.android.systemui", packageName)
+        h.removeCallbacks(tick)
         h.post(tick)
+    }
+
+    private fun poll() {
+        val pkg = rootInActiveWindow?.packageName?.toString()
+        if (pkg != null && pkg !in ignored) onForeground(pkg)
     }
 
     override fun onAccessibilityEvent(e: AccessibilityEvent) {
         val pkg = e.packageName?.toString() ?: return
         if (pkg in ignored) return
+        onForeground(pkg)
+    }
+
+    private fun onForeground(pkg: String) {
         if (overlay != null && pkg != overlayPkg) hideOverlay()
         current = pkg
         check(pkg)
     }
 
     private fun check(pkg: String) {
-        if (overlay != null) return
-        if (Prefs.blocked(this, pkg)) showOverlay(pkg)
+        if (overlay != null || pending == pkg) return
+        if (!Prefs.blocked(this, pkg)) return
+        pending = pkg
+        notifyHarv(pkg)
+        // Hemen kapatma yok: bildirim gelir, kısa bir süre sonra yemin ekranı açılır
+        h.postDelayed({
+            pending = null
+            if (current == pkg && overlay == null && Prefs.blocked(this, pkg)) showOverlay(pkg)
+        }, Prefs.GRACE_SEC * 1000L)
+    }
+
+    private fun notifyHarv(pkg: String) {
+        val nm = getSystemService(NotificationManager::class.java)
+        if (nm.getNotificationChannel("harv") == null) {
+            nm.createNotificationChannel(
+                NotificationChannel("harv", "Süre uyarısı", NotificationManager.IMPORTANCE_HIGH)
+            )
+        }
+        val label = try {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+        } catch (_: Throwable) { pkg }
+        nm.notify(
+            1,
+            Notification.Builder(this, "harv")
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentTitle(Prefs.NOTIF_TEXT)
+                .setContentText("$label için bugünkü süren doldu")
+                .setAutoCancel(true)
+                .build()
+        )
     }
 
     private fun showOverlay(pkg: String) {
-        val d = resources.displayMetrics.density
-        val pad = (24 * d).toInt()
+        val pad = (24 * resources.displayMetrics.density).toInt()
 
         val info = TextView(this).apply {
             textSize = 18f; setTextColor(Color.WHITE)
@@ -99,7 +137,6 @@ class GuardService : AccessibilityService() {
             (getSystemService(WINDOW_SERVICE) as WindowManager).addView(root, lp)
             overlay = root; overlayPkg = pkg
         } catch (t: Throwable) {
-            // Overlay eklenemezse en azından uygulamayı kapat
             performGlobalAction(GLOBAL_ACTION_HOME)
         }
     }
