@@ -8,8 +8,6 @@
         <category android:name="android.intent.category.LAUNCHER"/>
       </intent-filter>
     </activity>
-    <activity android:name=".OathActivity" android:exported="false"
-        android:excludeFromRecents="true" android:launchMode="singleTask"/>
     <service android:name=".GuardService" android:exported="false"
         android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
       <intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter>
