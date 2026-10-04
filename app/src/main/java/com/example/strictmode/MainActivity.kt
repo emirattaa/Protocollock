@@ -62,18 +62,25 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
 
         val perms = Button(this).apply {
-            text = "İzinler (3 adım)"
+            text = "İzinler (4 adım)"
             setOnClickListener {
                 AlertDialog.Builder(this@MainActivity).setTitle("İzinleri aç")
                     .setItems(arrayOf(
-                        "1) Kullanım erişimi", "2) Erişilebilirlik → Katı Mod", "3) Bildirim erişimi → Katı Mod"
+                        "1) Kullanım erişimi", "2) Erişilebilirlik → Katı Mod", "3) Bildirim erişimi → Katı Mod",
+                        "4) Pil optimizasyonu → Katı Mod'u kısıtlama"
                     )) { _, i ->
                         startActivity(Intent(when (i) {
                             0 -> Settings.ACTION_USAGE_ACCESS_SETTINGS
                             1 -> Settings.ACTION_ACCESSIBILITY_SETTINGS
-                            else -> Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
+                            2 -> Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
+                            else -> Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
                         }))
                     }.show()
             }
