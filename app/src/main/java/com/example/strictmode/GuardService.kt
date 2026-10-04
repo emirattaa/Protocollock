@@ -19,8 +19,14 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 
 class GuardService : AccessibilityService() {
+    companion object {
+        @Volatile var lastTick = 0L     // servis canlı mı (ana ekrandaki durum paneli için)
+        @Volatile var rootOk = false    // ekran içeriğini okuyabiliyor mu
+    }
+
     private val h = Handler(Looper.getMainLooper())
     private var current: String? = null
     private var pending: String? = null
@@ -28,11 +34,11 @@ class GuardService : AccessibilityService() {
     private var overlayPkg: String? = null
     private var ignored = setOf<String>()
 
-    // Her 2 sn'de bir ekrandaki gerçek uygulamaya bakar (olay kaçarsa bile yakalar)
+    // Her saniye ekrandaki gerçek uygulamaya bakar (son uygulamalardan dönüşte olay gelmese de yakalar)
     private val tick = object : Runnable {
         override fun run() {
             try { poll() } catch (_: Throwable) {}
-            h.postDelayed(this, 2_000)
+            h.postDelayed(this, 1_000)
         }
     }
 
@@ -45,7 +51,11 @@ class GuardService : AccessibilityService() {
     }
 
     private fun poll() {
-        val pkg = rootInActiveWindow?.packageName?.toString()
+        lastTick = System.currentTimeMillis()
+        var pkg = rootInActiveWindow?.packageName?.toString()
+        rootOk = pkg != null
+        // İçerik okuma izni yoksa (güncelleme sonrası olabilir) kullanım kayıtlarından tahmin et
+        if (pkg == null) pkg = Prefs.usage(this).fg
         if (pkg != null && pkg !in ignored) onForeground(pkg)
     }
 
@@ -65,8 +75,8 @@ class GuardService : AccessibilityService() {
         if (overlay != null || pending == pkg) return
         if (!Prefs.blocked(this, pkg)) return
         pending = pkg
-        notifyHarv(pkg)
-        // Hemen kapatma yok: bildirim gelir, kısa bir süre sonra yemin ekranı açılır
+        try { notifyHarv(pkg) } catch (_: Throwable) {}
+        // Hemen kapatma yok: bildirim gelir, kısa süre sonra yemin ekranı açılır
         h.postDelayed({
             pending = null
             if (current == pkg && overlay == null && Prefs.blocked(this, pkg)) showOverlay(pkg)
@@ -75,6 +85,11 @@ class GuardService : AccessibilityService() {
 
     private fun notifyHarv(pkg: String) {
         val nm = getSystemService(NotificationManager::class.java)
+        if (!nm.areNotificationsEnabled()) {
+            // Bildirim izni kapalıysa mesaj yine de görünsün
+            Toast.makeText(this, Prefs.NOTIF_TEXT, Toast.LENGTH_LONG).show()
+            return
+        }
         if (nm.getNotificationChannel("harv") == null) {
             nm.createNotificationChannel(
                 NotificationChannel("harv", "Süre uyarısı", NotificationManager.IMPORTANCE_HIGH)
@@ -83,12 +98,14 @@ class GuardService : AccessibilityService() {
         val label = try {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
         } catch (_: Throwable) { pkg }
+        nm.cancel(1) // eskisini silip yenisini gönder ki tekrar uyarsın
         nm.notify(
             1,
             Notification.Builder(this, "harv")
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentTitle(Prefs.NOTIF_TEXT)
                 .setContentText("$label için bugünkü süren doldu")
+                .setCategory(Notification.CATEGORY_ALARM)
                 .setAutoCancel(true)
                 .build()
         )
@@ -149,5 +166,7 @@ class GuardService : AccessibilityService() {
     }
 
     override fun onInterrupt() {}
-    override fun onDestroy() { h.removeCallbacksAndMessages(null); hideOverlay(); super.onDestroy() }
+    override fun onDestroy() {
+        lastTick = 0L; h.removeCallbacksAndMessages(null); hideOverlay(); super.onDestroy()
+    }
 }
